@@ -1,0 +1,14 @@
+From: Fictional Security Desk <notice@example.net>
+To: Fictional Recipient <recipient@example.org>
+Reply-To: Fictional Reply Desk <reply@example.com>
+Subject: FINAL WARNING!!!! ACTION REQUIRED
+Date: Sat, 26 Sep 2026 12:00:00 +0000
+Message-ID: <phishing-demo@example.net>
+Authentication-Results: gateway.example.org; spf=fail; dkim=fail; dmarc=fail
+Content-Type: text/plain; charset=utf-8
+
+This is entirely fictional demonstration evidence, containing no usable credentials.
+The bank security team says your account suspended. Verify your account immediately.
+Send your password and OTP, then transfer money as a payment.
+Keep this secret and bypass normal procedures.
+Use the documentation-only address http://192.0.2.10/fictional-login .

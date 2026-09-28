@@ -1,0 +1,2 @@
+# Synthetic mail fixtures are byte-sensitive (demo checksum verification).
+samples/*.eml -text

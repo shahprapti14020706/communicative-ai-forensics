@@ -1,0 +1,3 @@
+Entirely fictional plain-text evidence without email headers.
+The fictional workshop agenda contains a discussion of meeting notes.
+No other metadata is available in this synthetic export.
