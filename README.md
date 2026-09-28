@@ -67,7 +67,35 @@ cd communicative-ai-forensics
 .\.venv\Scripts\python.exe -m streamlit run app.py
 ```
 
-Open `http://127.0.0.1:8501`. The server binds to loopback with CORS/XSRF protection and telemetry disabled. Do not expose this academic prototype remotely.
+Open `http://127.0.0.1:8501`. Local execution binds to loopback with CORS/XSRF protection and telemetry disabled. Keep local investigations private. Community Cloud is supported only for the disposable synthetic demonstration described below.
+
+## Streamlit Community Cloud demonstration
+
+Deploy `shahprapti14020706/communicative-ai-forensics`, branch `main`, entrypoint `app.py`, using **Python 3.13** in Advanced settings. Dependencies come from `requirements.txt`. Configure the following sections in the application's **Advanced settings / Secrets** editor before starting it. Follow the official [Community Cloud secrets instructions](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management).
+
+```toml
+[bootstrap_admin]
+username = "admin"
+password = "..."
+display_name = "Demo Administrator"
+
+[bootstrap_investigator]
+username = "investigator"
+password = "..."
+display_name = "Demo Investigator"
+```
+
+The ellipses are invalid placeholders, not usable passwords. Replace each privately in the Cloud Secrets editor with a different strong password: 12–1024 characters containing uppercase, lowercase, a digit and a special character. Usernames must contain 3–64 letters, digits, dots, underscores or hyphens and must differ between sections. Do not publish credentials in Git, screenshots, logs or this README. Share demonstration access privately with intended participants.
+
+On every page startup, before login, the application initializes the SQLite schema and checks these optional sections through `st.secrets` only. Missing accounts are created atomically using the existing PBKDF2-HMAC-SHA256 password hashing with 600,000 iterations and fresh random salts. Repeated reruns do not duplicate accounts or reset passwords, display names, roles, disabled states or lockouts. Matching is case-insensitive. A username already assigned a different role causes a generic configuration error; it is never promoted automatically. Invalid account configuration rolls back account creation without showing secret values.
+
+`display_name` is optional (at most 120 characters) and is stored only when an account is created; public screens continue to show generated identifiers. Startup adds this optional column to older user tables while preserving existing credentials. Back up any existing local data before upgrading; this does not restore lost Cloud records.
+
+Cloud filesystem storage is disposable. If SQLite is recreated, both configured accounts are recreated from the saved Cloud secrets on the next page load. **This restores sign-in accounts only:** previous case assignments, evidence, reports, sessions and investigation history are not recovered. Old sessions must sign in again. Changing a password in Cloud secrets does not change an existing database account: use authenticated administrator password reset and keep the configured secret consistent for future recreation. Do not delete a database just to rotate a password.
+
+Use only fictional files from `samples/` on Cloud. Do not upload production evidence or personal information. This bootstrap does not provide durable storage or encryption at rest. It does not create cases or bypass case assignments; administrators must assign any shared demonstration cases to the investigator. Use the normal login form with the configured credentials; no Cloud CLI administrator setup is required.
+
+For local execution, omit both sections to retain the existing CLI administrator setup. Missing secrets files and missing sections are allowed; either section can be configured independently. Local testing may use an untracked `.streamlit/secrets.toml`, which remains ignored. Do not commit that file or add environment-variable/default-password fallbacks. For local reproduction, run `python -m unittest tests.test_bootstrap -v` in the Python 3.13 environment.
 
 ## Synthetic demonstration
 

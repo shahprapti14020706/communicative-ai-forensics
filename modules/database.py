@@ -145,6 +145,11 @@ def initialize_database(db_path: str | Path = DEFAULT_DB_PATH) -> None:
     try:
         with connection:
             connection.executescript(SCHEMA)
+            # Serialize additive migrations across simultaneous first page loads.
+            connection.execute('BEGIN IMMEDIATE')
+            user_columns = {row[1] for row in connection.execute('PRAGMA table_info(users)')}
+            if 'display_name' not in user_columns:
+                connection.execute("ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
             case_columns = {row[1] for row in connection.execute('PRAGMA table_info(cases)')}
             for name, kind in [
                 ('workflow_status', "TEXT NOT NULL DEFAULT 'Open'"), ('archived_at_utc', 'TEXT'),

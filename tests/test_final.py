@@ -192,7 +192,7 @@ class FinalTests(unittest.TestCase):
 
     def test_storage_errors_safe_on_every_page(self):
         for path in [Path('app.py'), *Path('pages').glob('*.py')]:
-            with patch.object(ui, 'initialize_database', side_effect=sqlite3.OperationalError('PRIVATE SQL PATH')):
+            with patch.object(ui.bootstrap, 'initialize_database', side_effect=sqlite3.OperationalError('PRIVATE SQL PATH')):
                 app = authenticated_app(self, str(path)).run()
                 self.assertFalse(app.exception)
                 self.assertTrue(app.error)

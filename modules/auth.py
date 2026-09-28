@@ -56,7 +56,7 @@ def _username(username):
     return username.lower()
 
 
-def _insert_user(c, username, password, role, actor=None):
+def _insert_user(c, username, password, role, actor=None, *, display_name=''):
     username = _username(username)
     _password(password)
     if role not in ROLES:
@@ -64,8 +64,8 @@ def _insert_user(c, username, password, role, actor=None):
     salt = secrets.token_bytes(32)
     digest = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, ITERATIONS)
     user_id, timestamp = 'USR-' + secrets.token_hex(12).upper(), utc_now()
-    c.execute('INSERT INTO users(user_id,username,password_hash,password_salt,password_iterations,role,created_at_utc,updated_at_utc) '
-              'VALUES(?,?,?,?,?,?,?,?)', (user_id, username, digest, salt, ITERATIONS, role, timestamp, timestamp))
+    c.execute('INSERT INTO users(user_id,username,password_hash,password_salt,password_iterations,role,created_at_utc,updated_at_utc,display_name) '
+              'VALUES(?,?,?,?,?,?,?,?,?)', (user_id, username, digest, salt, ITERATIONS, role, timestamp, timestamp, display_name))
     event(c, 'USER_CREATED', actor or user_id, target_user_id=user_id, role=role)
     return user_id
 

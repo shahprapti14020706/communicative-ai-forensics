@@ -3,8 +3,8 @@
 import streamlit as st
 import sqlite3
 from contextlib import contextmanager
-from modules import auth
-from modules.database import DEFAULT_DB_PATH, initialize_database, connect_database
+from modules import auth, bootstrap
+from modules.database import DEFAULT_DB_PATH, connect_database
 from modules.encryption import encryption_status
 
 AUTH_DB_PATH = DEFAULT_DB_PATH
@@ -15,6 +15,9 @@ def page_errors():
     """A final safe boundary for storage failures anywhere in a page execution."""
     try:
         yield
+    except bootstrap.BootstrapError:
+        st.error(bootstrap.MESSAGE)
+        st.stop()
     except auth.AccessDenied:
         st.error(auth.DENIED + ' Sign in again or ask your administrator to check case access.')
         st.stop()
@@ -27,7 +30,7 @@ def page_errors():
 
 
 def require_login():
-    initialize_database(AUTH_DB_PATH)
+    bootstrap.initialize_demo_accounts(AUTH_DB_PATH)
     try:
         return auth.current_user(AUTH_DB_PATH, token=st.session_state.get('auth_token'), touch=True)
     except auth.AccessDenied:

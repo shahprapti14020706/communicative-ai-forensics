@@ -2,6 +2,11 @@
 from pathlib import Path
 import sqlite3
 import socket
+import streamlit as st
+
+# AppTest otherwise inherits local/global secrets when no test secrets are set.
+# Bootstrap tests explicitly inject generated synthetic configurations.
+st.secrets = {}
 
 _connect = sqlite3.connect
 _production = Path(__file__).resolve().parent.parent / 'data'
