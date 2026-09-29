@@ -1,7 +1,6 @@
 from modules.ui import page_errors
 
 with page_errors():
-    """Step 5: human decisions remain separate from automated findings."""
     import json
     import streamlit as st
     from modules.ui import setup_page, may, technical_details, case_labels, email_label
