@@ -1,7 +1,6 @@
 from modules.ui import page_errors
 
 with page_errors():
-    """Controlled local Q&A over selected masked evidence and stored analysis."""
     import streamlit as st
     from modules.ui import setup_page, page_permission, technical_details
     from modules.qa_engine import MAX_QUESTION, MAX_MESSAGES

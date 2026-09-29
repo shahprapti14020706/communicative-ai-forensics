@@ -13,7 +13,6 @@ with page_errors():
     setup_page('New Investigation')
     page_permission('upload')
     st.title('New Investigation')
-    st.write('Create a case and upload the email you want to review.')
     with st.container(border=True):
         st.subheader('Investigation details')
         title = st.text_input('Case title', placeholder='Enter a short case title')
