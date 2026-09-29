@@ -1,7 +1,7 @@
 from modules.ui import page_errors
 
 with page_errors():
-    """Local, versioned HTML and JSON reports; no embedded report HTML is executed."""
+    """Reports are saved securely, and previous versions remain available for review."""
     import streamlit as st
     from modules.ui import setup_page, may, technical_details, case_labels, email_label
     from modules.presentation import classification, date_label, report_sections

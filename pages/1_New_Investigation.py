@@ -1,7 +1,7 @@
 from modules.ui import page_errors
 
 with page_errors():
-    """Local case intake and masked CSV row selection."""
+    """Create a case and upload authorized evidence."""
     from pathlib import Path
     import streamlit as st
     from modules.ui import setup_page, page_permission
