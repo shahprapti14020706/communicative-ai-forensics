@@ -3,15 +3,16 @@ from modules.ui import page_errors
 with page_errors():
     """Controlled local Q&A over selected masked evidence and stored analysis."""
     import streamlit as st
-    from modules.ui import setup_page, page_permission
-    from modules.qa_engine import SUGGESTIONS, MAX_QUESTION, MAX_MESSAGES
+    from modules.ui import setup_page, page_permission, technical_details
+    from modules.qa_engine import MAX_QUESTION, MAX_MESSAGES
+    from modules.presentation import SUGGESTIONS, UNSUPPORTED, classification, plain_answer, finding_text, NEXT_STEPS
     from modules.qa_service import (available_analyses, load_context, ask, page_event, conversation_key,
                                     append_visible, clear_visible, ScopeError)
 
-    setup_page('Ask the Evidence')
+    setup_page('Ask About the Email')
     page_permission('ask')
-    st.title('Ask the Evidence')
-    st.write('Deterministic local answers from masked evidence and the selected analysis. No language model or external service is used.')
+    st.title('Ask About the Email')
+    st.write('Ask simple questions about the selected email.')
     case_id = st.session_state.get('active_case_id')
     evidence_id = st.session_state.get('active_evidence_id')
     if not case_id or not evidence_id:
@@ -21,12 +22,12 @@ with page_errors():
         history = available_analyses(case_id, evidence_id)
         analysis_id = None
         if history:
-            choices = {item['analysis_id']: f"Version {item['analysis_version']} | {item['analysis_timestamp']}" for item in history}
+            choices = {item['analysis_id']: f"Analysis {item['analysis_version']}" for item in history}
             selection_key = 'qa_analysis_' + case_id + '_' + evidence_id
             previous_selection = st.session_state.get('selected_analysis_' + evidence_id)
             if selection_key not in st.session_state or st.session_state[selection_key] not in choices:
                 st.session_state[selection_key] = previous_selection if previous_selection in choices else next(iter(choices))
-            analysis_id = st.selectbox('Selected analysis version (latest 100)', list(choices), format_func=choices.get, key=selection_key)
+            analysis_id = st.selectbox('Analysis to review', list(choices), format_func=choices.get, key=selection_key)
         context = load_context(case_id, evidence_id, analysis_id)
         page_event(case_id, evidence_id, 'Ask-the-Evidence page opened')
     except ScopeError:
@@ -37,37 +38,27 @@ with page_errors():
         st.stop()
 
     metadata, analysis = context['metadata'], context.get('analysis')
-    for label, value in [('Active Case ID', case_id), ('Active Evidence ID', evidence_id),
-                         ('Evidence filename', metadata['original_filename']),
-                         ('Selected classification', analysis['classification'] if analysis else 'No completed analysis'),
-                         ('Selected risk score', str(analysis['risk_score']) + '/100 — not a probability' if analysis else 'Unavailable'),
-                         ('Selected analysis version', str(analysis['analysis_version']) if analysis else 'Unavailable')]:
-        st.caption(label)
-        st.code(str(value), language=None)
-    integrity = context.get('integrity')
-    if integrity:
-        st.info(('Last recorded integrity check: passed' if integrity['status'] == 'success' else 'Last recorded integrity check: failed') + ' | ' + integrity['created_at'])
+    st.text('Selected email: ' + metadata['original_filename'])
+    if analysis:
+        st.text('Result: ' + classification(analysis['classification']))
     else:
-        st.info('No recorded integrity verification is available.')
-    st.caption('Q&A reports the stored integrity check only. Use Verify Integrity Again on Evidence Analysis for a fresh check.')
+        st.info('Analyze the email first to ask about warning signs.')
     if not context.get('working'):
-        st.warning('Masked working JSON is unavailable. Evidence-field questions will identify missing information; originals are never used as a fallback.')
-    if not analysis:
-        st.info('Run Phishing Analysis first for classification, score, findings and analysis-related questions. Metadata questions remain available.')
+        st.warning('The email preview is unavailable. Some questions cannot be answered.')
 
     key = conversation_key(case_id, evidence_id, analysis_id)
     if st.button('Clear Conversation'):
         clear_visible(st.session_state, key, case_id, evidence_id)
         st.session_state.pop(key + ':limit', None)
-        st.info('Visible conversation cleared. Persisted Q&A records and audit events are retained.')
+        st.info('Conversation cleared from this view.')
 
-    st.caption(f'Questions: maximum {MAX_QUESTION} characters. Conversation: latest {MAX_MESSAGES} messages. Answers: at most 10 snippets of 250 characters.')
+
     question = None
     columns = st.columns(2)
     for index, suggestion in enumerate(SUGGESTIONS):
         if columns[index % 2].button(suggestion, key='qa_suggestion_' + str(index), use_container_width=True):
             question = suggestion
-    chat_question = st.chat_input('Ask about the selected evidence', max_chars=MAX_QUESTION)
+    chat_question = st.chat_input('Ask about the selected email', max_chars=MAX_QUESTION)
     if chat_question:
         question = chat_question
     if question:
@@ -81,7 +72,7 @@ with page_errors():
         except Exception:
             st.error('Question processing failed. A safe error event was recorded; no original evidence was opened.')
     if st.session_state.get(key + ':limit'):
-        st.warning('The 50-message display limit was reached. Older messages are hidden; persisted interactions and audit records remain unchanged.')
+        st.warning('Showing the latest 50 messages. Earlier questions remain saved.')
 
     # The transcript is display-only and partitioned by case, evidence and analysis.
     # Every submission above reloads evidence; none of these messages feed the engine.
@@ -90,16 +81,17 @@ with page_errors():
             st.caption('Investigator question (masked)')
             st.text(interaction['question'])
         with st.chat_message('assistant'):
-            st.caption('System answer — deterministic evidence retrieval')
-            st.text(interaction['answer'])
-            st.caption('Evidence sources and masked supporting evidence')
-            for ref in interaction['evidence_references']:
-                st.text(ref['source'] + ' | ' + ref['field'])
-                snippet = ref['snippet'].replace('https://', 'hxxps://').replace('http://', 'hxxp://')
-                st.code(snippet, language=None)
-            st.caption('Limitations')
-            for limitation in interaction['limitations']:
-                st.text(limitation)
-            for limit in interaction['limits_reached']:
-                st.warning(limit)
-            st.caption('Interaction ' + interaction['interaction_id'] + ' | UTC ' + interaction['created_at'])
+            if interaction['status'] in {'unsupported', 'insufficient', 'clarification'}:
+                st.text(UNSUPPORTED)
+            else:
+                st.text(plain_answer(interaction.get('display_answer') or interaction['answer']))
+            if interaction['status'] == 'completed':
+                st.caption('Sources reviewed')
+                for ref in interaction['evidence_references']:
+                    if ref['source'] in {'System scope', 'Question matcher'}:
+                        continue
+                    st.text('Email analysis' if 'analysis' in ref['source'].lower() else 'Email information')
+                    field = ref.get('field', '')
+                    if field in {'sender', 'recipient', 'subject', 'body', 'reply_to', 'urls', 'attachments'} or field.endswith('.masked_evidence'):
+                        st.code(plain_answer(ref['snippet']).replace('https://', 'hxxps://').replace('http://', 'hxxp://'), language=None)
+            technical_details(interaction)

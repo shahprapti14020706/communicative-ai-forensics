@@ -36,6 +36,21 @@ class VerificationTests(unittest.TestCase):
         values.update(changes)
         return service.record_decision(**values)
 
+    def test_readable_prose_keeps_identifiers_private(self):
+        prose = 'Why ask what information should be checked through links? The email creates urgency.'
+        self.assertEqual(service.private_text(prose), prose)
+        for secret in ('Name: Zorvian Quell', 'alice@example.test', '+1 202 555 0100',
+                       '192.0.2.15', 'ABCDE1234F', '1234 5678 9012'):
+            masked = service.private_text(prose + ' ' + secret)
+            self.assertNotIn(secret, masked)
+            self.assertTrue(masked.startswith(prose))
+            self.assertEqual(service.private_text(masked), masked)
+
+    def test_explicit_decision_reason_validation(self):
+        for reason in ('', '   ', 'x' * 5001, 23):
+            with self.subTest(reason=repr(reason)[:30]), self.assertRaises(ValidationError):
+                self.submit(decision_reason=reason)
+
     def test_approve(self):
         result = self.submit()
         self.assertEqual(result['final_classification'], self.analysis['classification'])
@@ -213,21 +228,26 @@ class VerificationTests(unittest.TestCase):
         self.assertTrue(app.button[0].disabled)
         app.text_input[0].set_value('Fictional Reviewer')
         app.text_area[0].set_value('I reviewed the evidence and the analysis limitations.')
+        app.text_area[1].set_value('I reviewed the evidence and the analysis limitations.')
         app.checkbox[0].check().run()
         self.assertFalse(app.button[0].disabled)
         app.button[0].click().run()
         self.assertFalse(app.exception)
-        self.assertTrue(any(x.value == 'Human verification decision recorded successfully.' for x in app.success))
+        self.assertTrue(any(x.value == 'Your decision has been recorded.' for x in app.success))
         self.assertEqual(len(self.query('SELECT * FROM investigator_decisions')), 1)
         self.assertTrue(any('preserve the previous decision' in x.value for x in app.info))
+        saved = service.decision_history(self.case, self.evidence, self.aid, db_path=self.db)[0]
+        self.assertEqual(saved['masked_decision_reason'], 'I reviewed the evidence and the analysis limitations.')
+        self.assertEqual(saved['masked_verification_notes'], 'I reviewed the evidence and the analysis limitations.')
+        self.assertNotIn('Reason:', saved['masked_verification_notes'])
 
     def test_page_conditional_fields(self):
         app = self.isolated_page()
-        app.selectbox[3].select('Modify Conclusion').run()
+        app.selectbox[3].select('Update the Conclusion').run()
         self.assertFalse(app.exception)
-        self.assertEqual(app.selectbox[4].options, service.CLASSIFICATIONS)
+        self.assertEqual(app.selectbox[4].options, ['Suspicious', 'Needs Review', 'No Warning Signs Found'])
         self.assertTrue(app.button[0].disabled)
-        app.selectbox[3].select('Request Further Analysis').run()
+        app.selectbox[3].select('Needs More Investigation').run()
         self.assertFalse(app.exception)
         next(x for x in app.checkbox if x.label == 'Other').check().run()
         self.assertTrue(any(x.label == 'Other request description' for x in app.text_area))
@@ -237,7 +257,7 @@ class VerificationTests(unittest.TestCase):
         app = self.isolated_page()
         self.assertFalse(app.exception)
         self.assertTrue(app.button[0].disabled)
-        self.assertTrue(any(x.value == service.BLOCKED for x in app.error))
+        self.assertTrue(any(x.value == 'The email integrity check failed. A decision cannot be recorded.' for x in app.error))
 
     def test_empty_database(self):
         self.db = self.root / 'empty.db'

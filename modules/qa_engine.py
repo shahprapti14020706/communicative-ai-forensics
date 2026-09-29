@@ -87,6 +87,8 @@ ANALYSIS_INTENTS = {'classification', 'score', 'risk_level', 'explanations', 'su
 
 def match_intents(question):
     text = normalized(question)
+    if text == 'does it ask for personal information':
+        return ['credentials']
     if re.search(r'\b(?:guilty|criminal responsibility|commit(?:ted)? (?:a )?(?:crime|cybercrime)|arrest(?:ed)?|criminal)\b', text):
         return ['legal_conclusion']
     if INJECTION.search(question) or re.search(r'\b(?:other|another|all|unrelated) cases?\b|\b(?:read|open|load|delete|execute|run|download)\b.*(?:[/\\]|\b(?:file|command|script|audit|sql)\b)', question, re.I):
@@ -384,5 +386,23 @@ def answer_question(question, context):
         result['limitations'].append('The working representation was truncated; omitted evidence cannot be evaluated here.')
     if context.get('integrity', {}).get('status') == 'failure':
         result['limitations'].append('The last recorded integrity check failed. These answers describe stored representations, not currently verified evidence.')
+    # Presentation is derived from this selected evidence, never prior chat or a
+    # fixed phishing verdict. Keep the technical answer and references intact.
+    if result['status'] == 'completed' and intent in {'explanations', 'suspicious_words'}:
+        from modules.presentation import finding_text
+        statements = list(dict.fromkeys(finding_text(item) for item in selected[:10]))
+        if any(item['rule_id'] == 'urgency' for item in selected) and re.search(
+                r'account (?:will be )?suspend(?:ed|ed soon)|account suspension',
+                (working or {}).get('body', ''), re.I):
+            statements.insert(1, 'The email threatens account suspension.')
+        result['display_answer'] = ' '.join(statements) or 'No matching warning signs were recorded in the selected analysis. This does not guarantee that the email is safe.'
+    elif result['status'] == 'completed' and intent == 'urls' and re.search(r'\b(?:suspicious|dangerous|malicious)\b', text):
+        if urls:
+            account_link = any(re.search(r'(?:account[-_/]?verif|verify[-_/]?account)', url, re.I) for url in urls)
+            account_link |= bool(re.search(r'\bverify your account\b|account[- ]verification', (working or {}).get('body', ''), re.I))
+            result['display_answer'] = ('The email contains an account-verification link.' if account_link else 'The email contains a link that needs independent verification.') + ' Do not open it until the sender and destination have been independently verified.'
+            reference('Masked working copy', 'urls.length', len(urls))
+        else:
+            result['display_answer'] = 'No links were retained in the available email information. This does not guarantee that the email is safe.'
     result['limits_reached'] = list(dict.fromkeys(result['limits_reached']))
     return result

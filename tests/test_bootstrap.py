@@ -179,7 +179,7 @@ class BootstrapTests(unittest.TestCase):
                 app.text_input[1].set_value(section['password'])
                 app.button[0].click().run()
                 self.assertFalse(app.exception)
-                self.assertTrue(any(title.value == 'Communicative AI in Digital Forensics' for title in app.title))
+                self.assertTrue(any(title.value == 'Communicative AI Digital Forensics Assistant' for title in app.title))
 
     def test_direct_page_initializes_before_login(self):
         with patch.object(ui, 'AUTH_DB_PATH', self.db):

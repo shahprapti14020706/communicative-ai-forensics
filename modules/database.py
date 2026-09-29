@@ -186,6 +186,7 @@ def initialize_database(db_path: str | Path = DEFAULT_DB_PATH) -> None:
                 ('evidence_sha256', 'TEXT'), ('created_at_utc', 'TEXT'),
                 ('supersedes_decision_id', 'TEXT REFERENCES investigator_decisions(decision_id)'),
                 ('masked_version_reason', 'TEXT'), ('masked_change_reason', 'TEXT'),
+                ('masked_decision_reason', "TEXT NOT NULL DEFAULT ''"),
             ]:
                 if name not in decision_columns:
                     connection.execute(f'ALTER TABLE investigator_decisions ADD COLUMN {name} {kind}')

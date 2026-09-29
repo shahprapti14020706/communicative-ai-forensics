@@ -22,8 +22,8 @@ FAILURE = 'Invalid credentials or account temporarily unavailable.'
 DENIED = 'Permission denied. The requested operation is unavailable.'
 ROLES = ('Administrator', 'Investigator', 'Reviewer')
 PERMISSIONS = {
- 'Administrator': {'read','upload','analyze','ask','decide','report_generate','report_read','admin','audit','archive'},
- 'Investigator': {'read','upload','analyze','ask','decide','report_generate','report_read'},
+ 'Administrator': {'read','upload','analyze','ask','decide','report_generate','report_read','admin','audit','archive','activity'},
+ 'Investigator': {'read','upload','analyze','ask','decide','report_generate','report_read','activity'},
  'Reviewer': {'read','decide','report_read'},
 }
 _token = ContextVar('local_auth_session', default=None)

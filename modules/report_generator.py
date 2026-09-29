@@ -11,7 +11,7 @@ from modules.audit import record, utc_now
 from modules.database import DEFAULT_DB_PATH, initialize_database, connect_database
 from modules.evidence_handler import (DATA_ROOT, ValidationError, confined, atomic_write,
                                       verify_integrity, sha256_bytes)
-from modules.verification_service import _scope, private_text, DECISIONS, CLASSIFICATIONS, ACTIONS
+from modules.verification_service import _scope, private_text, decision_text, DECISIONS, CLASSIFICATIONS, ACTIONS
 from modules.phishing_analyzer import RULES
 
 NO_DECISION = 'Complete Human Verification before generating the forensic report.'
@@ -155,6 +155,7 @@ def _document(c, sources, info):
             raise ValidationError('Stored Q&A structure is invalid.')
         interactions.append(dict(interaction_id=row['interaction_id'], analysis_id=row['analysis_id'],
             masked_question=masked(row['masked_question']), masked_answer=masked(response.get('answer', '')),
+            masked_display_answer=masked(response.get('display_answer', '')),
             evidence_source_labels=[masked(r.get('source', '')) for r in refs if isinstance(r, dict)
                 and r.get('case_id', case_id) == case_id and r.get('evidence_id', evidence_id) == evidence_id],
             timestamp_utc=row['created_at'], status=row['status'],
@@ -183,6 +184,7 @@ def _document(c, sources, info):
     investigator = decision['investigator_name']
     if not re.fullmatch(r'\[INVESTIGATOR-[A-F0-9]{12}\]', investigator):
         investigator = '[INVESTIGATOR]'
+    decision_notes, decision_reason = decision_text(decision)
     return {
         'report_information': dict(info, system_name='Communicative AI Digital Forensics Assistant',
             academic_statement='This system is an academic prototype.'),
@@ -208,7 +210,8 @@ def _document(c, sources, info):
             history_limit=MAX_HISTORY, truncated=len(qa_rows) > MAX_HISTORY),
         'human_verification': dict(decision_id=decision['decision_id'], decision_version=decision['decision_version'],
             decision_type=decision['decision_type'], automated_classification=decision['automated_classification'],
-            human_verified_classification_or_status=human_status, masked_verification_notes=masked(decision['masked_verification_notes']),
+            human_verified_classification_or_status=human_status, masked_verification_notes=masked(decision_notes),
+            masked_decision_reason=masked(decision_reason) if decision_reason != 'Not recorded.' else decision_reason,
             requested_further_actions=[v if v in ACTIONS else '[PRIVATE]' for v in requests['actions']],
             other_request=masked(requests.get('other_description', '')),
             masked_change_reason=masked(decision['masked_change_reason']),
@@ -232,21 +235,25 @@ def render_html(document):
         if isinstance(value, list):
             return '<ul>' + ''.join('<li>' + render(v) + '</li>' for v in value) + '</ul>' if value else '<p>None recorded.</p>'
         return '<span>' + escape('Not applicable' if value is None else str(value), quote=True) + '</span>'
-    body = ''.join('<section><h2>' + escape(k.replace('_', ' ').upper(), quote=True) + '</h2>' + render(v) + '</section>' for k, v in document.items())
+    from modules.presentation import report_sections
+    sections = report_sections(document) if 'case_information' in document else {}
+    body = ''.join('<section><h2>' + escape(k.replace('_', ' ').upper(), quote=True) + '</h2>' + render(v) + '</section>' for k, v in sections.items())
+    body += '<details><summary>Technical Record</summary>' + render(document) + '</details>'
     return ('''<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
-<title>Local Forensic Report</title><style>
+<title>Investigation Report</title><style>
 body{font:14px Georgia,serif;color:#000;background:#fff;max-width:1100px;margin:32px auto;padding:20px;line-height:1.5}
 h1,h2{font-family:Arial,sans-serif;color:#000}h1{border-bottom:3px solid #000}h2{font-size:18px;border-bottom:1px solid #000;padding-top:20px}
 table{border-collapse:collapse;width:100%;margin:8px 0}th,td{border:1px solid #777;text-align:left;vertical-align:top;padding:8px;overflow-wrap:anywhere}
 th{width:26%;font-family:Arial,sans-serif}span{white-space:pre-wrap}li{margin:6px 0}
-@media print{body{margin:0;padding:0;max-width:none;font-size:10pt}h2{break-after:avoid}tr{break-inside:avoid}thead{display:table-header-group}}
-</style></head><body><h1>Forensic Report</h1>''' + body + '</body></html>').encode('utf-8')
+@media print{details:not([open]){display:none}body{margin:0;padding:0;max-width:none;font-size:10pt}h2{break-after:avoid}tr{break-inside:avoid}thead{display:table-header-group}}
+</style></head><body><h1>Investigation Report</h1>''' + body + '</body></html>').encode('utf-8')
 
 
 @guard('report_read')
-def preview_report(case_id, evidence_id, analysis_id, decision_id, db_path=DEFAULT_DB_PATH, data_root=DATA_ROOT):
+def preview_report(case_id, evidence_id, analysis_id, decision_id, db_path=DEFAULT_DB_PATH, data_root=DATA_ROOT,
+                   version_reason=''):
     initialize_database(db_path)
     c = connect_database(db_path)
     scope = None
@@ -256,7 +263,10 @@ def preview_report(case_id, evidence_id, analysis_id, decision_id, db_path=DEFAU
         scope = (case_id, evidence_id)
         if not verify_integrity(evidence_id, db_path, data_root, audit=False):
             raise ValidationError(BLOCKED)
-        document = _document(c, sources, dict(report_id='Not generated', report_version=None,
+        history = _history(c, case_id, evidence_id, analysis_id, decision_id)
+        document = _document(c, sources, dict(report_id='Not generated',
+                             report_version=history[0]['report_version'] + 1 if history else 1,
+                             masked_version_reason=masked(version_reason),
                              created_at_utc=utc_now(), status='preview'))
         _event(c, 'REPORT_PREVIEWED', (case_id, evidence_id), analysis_id=analysis_id, decision_id=decision_id, integrity_status='verified')
         c.commit()
@@ -292,13 +302,14 @@ def generate_report(case_id, evidence_id, analysis_id, decision_id, version_reas
         previous = history[0]['report_id'] if history else None
         if expected_previous_id != previous:
             raise ValidationError('Report history changed. Review the latest report before generating a new version.')
-        if history and (not isinstance(version_reason, str) or not 1 <= len(version_reason.strip()) <= 5000):
+        if (not isinstance(version_reason, str) or len(version_reason.strip()) > 5000
+                or (history and not version_reason.strip())):
             raise ValidationError('A reason of 1–5000 characters is required for a new report version.')
         report_id = 'RPT-' + uuid.uuid4().hex[:12].upper()
         version = history[0]['report_version'] + 1 if history else 1
         now = utc_now()
         info = dict(report_id=report_id, report_version=version, created_at_utc=now, status='generated',
-                    supersedes_report_id=previous, masked_version_reason=masked(version_reason.strip()) if history else '')
+                    supersedes_report_id=previous, masked_version_reason=masked(version_reason.strip()))
         # The event is part of the same transaction and therefore of the report's
         # custody snapshot. Neither survives if artifact creation fails.
         _event(c, 'REPORT_GENERATED', (case_id, evidence_id), report_id=report_id, report_version=version,

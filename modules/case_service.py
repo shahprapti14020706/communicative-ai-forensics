@@ -288,11 +288,15 @@ def delete_case(case_id, confirmation, db_path=DEFAULT_DB_PATH, data_root=DATA_R
 
 
 @guard('audit')
-def audit_history(case_id=None, db_path=DEFAULT_DB_PATH):
+def audit_history(case_id=None, db_path=DEFAULT_DB_PATH, event_filter=None, status_filter=None, offset=0):
+    if type(offset) is not int or offset < 0:
+        raise ValidationError('History offset must be a non-negative integer.')
     c = connect_database(db_path)
     try:
-        # Omit legacy free-text details and actors from the new audit UI.
-        return [dict(zip(('timestamp_utc','case_id','evidence_id','event','status'), r)) for r in c.execute(
-            'SELECT created_at,case_id,evidence_id,action,status FROM audit_logs WHERE case_id=? OR case_id IS NULL ORDER BY audit_id DESC LIMIT 500', (case_id,))]
+        return [dict(zip(('timestamp_utc','case_id','evidence_id','event','status','actor','details'), r)) for r in c.execute(
+            'SELECT created_at,case_id,evidence_id,action,status,actor,details FROM audit_logs '
+            'WHERE (? IS NULL OR case_id=?) AND (? IS NULL OR action=?) AND (? IS NULL OR status=?) '
+            'ORDER BY audit_id DESC LIMIT 500 OFFSET ?',
+            (case_id, case_id, event_filter, event_filter, status_filter, status_filter, offset))]
     finally:
         c.close()

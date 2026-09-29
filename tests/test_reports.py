@@ -46,6 +46,93 @@ class ReportTests(unittest.TestCase):
         return reports.download_bytes(self.case, self.evidence, report['report_id'], kind,
                                        audit=audit, db_path=self.db, data_root=self.root)
 
+    def test_separate_reason_notes_and_version_details(self):
+        from modules.presentation import report_sections
+        reason = ('The email creates urgency, threatens account suspension and requests '
+                  'confidential login information through an unverified link.')
+        notes = ('The sender and verification link should be independently checked. '
+                 'The recipient should not click the link or provide credentials.')
+        version_reason = ('Initial investigation report created after completing email '
+                          'analysis and investigator verification.')
+        actions = ['Inspect email headers', 'Examine suspicious links', 'Examine attachments']
+        current = self.submit(decision_type='Request Further Analysis', decision_reason=reason,
+            notes=notes, requested_actions=actions, expected_previous_id=self.did,
+            version_reason='Additional context reviewed.')
+        self.did = current['decision_id']
+        self.assertEqual(current['masked_decision_reason'], reason)
+        self.assertEqual(current['masked_verification_notes'], notes)
+        first = self.generate(version_reason=version_reason)
+        second = self.generate(version_reason=version_reason, expected_previous_id=first['report_id'])
+        preview = reports.preview_report(self.case, self.evidence, self.aid, self.did,
+            self.db, self.root, version_reason=version_reason)
+        third = self.generate(version_reason=version_reason, expected_previous_id=second['report_id'])
+        for document in (preview, self.manifest(third)):
+            sections = report_sections(document)
+            decision = next(v for k, v in sections.items() if k.endswith('final decision'))
+            self.assertEqual(decision, {'Decision': 'Needs More Investigation',
+                'Reason': reason, 'Requested checks': actions})
+            self.assertEqual(next(v for k, v in sections.items() if k.endswith('notes')), notes)
+            self.assertEqual(sections['Report version details'],
+                {'Version': 3, 'Reason for this version': version_reason})
+        html = self.download(third).decode().split('<details>')[0]
+        for value in (reason, notes, version_reason, 'REPORT VERSION DETAILS', *actions):
+            self.assertIn(value, html)
+        self.assertNotIn('Reason: ', self.manifest(third)['human_verification']['masked_verification_notes'])
+        self.assertTrue(self.verify(first))
+        self.assertTrue(self.verify(third))
+
+    def test_legacy_embedded_reason_is_presented_without_mutating_record(self):
+        notes = 'The sender should be independently checked.'
+        reason = 'The email creates urgency through an unverified link.'
+        current = self.submit(notes=notes + '\nReason: ' + reason,
+            expected_previous_id=self.did, version_reason='Additional context reviewed.')
+        self.did = current['decision_id']
+        human = self.manifest(self.generate())['human_verification']
+        self.assertEqual(human['masked_decision_reason'], reason)
+        self.assertEqual(human['masked_verification_notes'], notes)
+        saved = verification_service.decision_history(self.case, self.evidence, self.aid, self.db)[0]
+        self.assertIn('\nReason: ', saved['masked_verification_notes'])
+
+    def test_readable_questions_survive_preview_and_html(self):
+        from modules.presentation import report_sections
+        data = (b'From: Alice Example <alice@example.test>\nTo: recipient@example.test\n'
+                b'Subject: Urgent account verification\n\n'
+                b'Verify your account immediately or your account will be suspended. '
+                b'Provide login details at https://example.test/account-verification')
+        title = 'Account verification investigation'
+        purpose = 'Contact the sender and examine any suspicious findings.'
+        self.case, self.evidence = self.register(data=data, title=title, description=purpose)
+        self.aid = run_analysis(self.evidence, self.db, self.root)['analysis_id']
+        reason = 'The email creates urgency and asks for login credentials.'
+        notes = 'The sender and verification link should be independently checked.'
+        self.did = self.submit(decision_reason=reason, notes=notes)['decision_id']
+        questions = ['Why is this email suspicious?', 'Are there any suspicious links?']
+        responses = [qa_service.ask(self.case, self.evidence, question, self.aid, self.db, self.root) for question in questions]
+        self.assertIn('urgency', responses[0]['display_answer'])
+        self.assertIn('account suspension', responses[0]['display_answer'])
+        self.assertIn('login details', responses[0]['display_answer'])
+        link_answer = ('The email contains an account-verification link. Do not open it until '
+                       'the sender and destination have been independently verified.')
+        self.assertEqual(responses[1]['display_answer'], link_answer)
+        version_reason = 'Initial report created after completing investigator verification.'
+        preview = reports.preview_report(self.case, self.evidence, self.aid, self.did, self.db, self.root,
+                                         version_reason=version_reason)
+        report = self.generate(version_reason=version_reason)
+        for document in (preview, self.manifest(report)):
+            sections = report_sections(document)
+            self.assertEqual(sections['Case details'], {'Title': title, 'Purpose': purpose})
+            self.assertEqual([item['Question'] for item in sections['Questions and answers']], questions)
+            self.assertEqual(sections['Questions and answers'][1]['Answer'], link_answer)
+            self.assertNotIn('[PRIVATE]', str(sections))
+            self.assertNotIn('alice@example.test', str(document))
+            self.assertNotIn('Alice Example', str(document))
+            self.assertEqual(document['human_verification']['masked_decision_reason'], reason)
+            self.assertEqual(document['human_verification']['masked_verification_notes'], notes)
+            self.assertEqual(sections['Report version details']['Reason for this version'], version_reason)
+        html = self.download(report).decode().split('<details>')[0]
+        for text in (*questions, link_answer, reason, notes, version_reason):
+            self.assertIn(text, html)
+
     def test_completed_report_and_identifiers(self):
         report = self.generate()
         self.assertRegex(report['report_id'], r'^RPT-[A-F0-9]{12}$')
@@ -311,7 +398,7 @@ class ReportTests(unittest.TestCase):
         self.assertFalse(app.exception)
         next(b for b in app.button if b.label == 'Generate report').click().run()
         self.assertFalse(app.exception)
-        self.assertTrue(any(x.value == 'Forensic report generated successfully.' for x in app.success))
+        self.assertTrue(any(x.value == 'Investigation report generated.' for x in app.success))
         self.assertEqual(len(app.get('download_button')), 2)
         self.assertEqual(len(self.query('SELECT * FROM reports')), 1)
         self.assertTrue(next(b for b in app.button if b.label == 'Generate report').disabled)

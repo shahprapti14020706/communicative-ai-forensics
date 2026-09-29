@@ -4,6 +4,8 @@ from modules.ui import setup_page, page_errors
 
 with page_errors():
     setup_page('About the Prototype')
+    from modules.ui import page_permission
+    page_permission('admin')
     st.title('Communicative AI in Digital Forensics: A Human-in-the-Loop Framework for Cybercrime Investigation')
     st.caption('Academic prototype | Authors: Prapti Shah and Aayursha Raut')
     sections = [

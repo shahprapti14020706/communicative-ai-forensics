@@ -12,7 +12,7 @@ INTEGRITY_EVENTS = ('Integrity rechecked', 'Integrity checked before analysis', 
 
 @guard('read')
 def case_progress(case_id=None, db_path=DEFAULT_DB_PATH):
-    result = dict(case_id=case_id, status='No case selected', evidence_count=0,
+    result = dict(case_id=case_id, activity_history_viewed=False, status='No case selected', evidence_count=0,
                   classification='No analysis', next_action='Select an accessible case or create a new investigation.',
                   next_page='pages/1_New_Investigation.py', stages=dict.fromkeys(STAGES, 'Not Started'))
     if not case_id:
@@ -21,6 +21,9 @@ def case_progress(case_id=None, db_path=DEFAULT_DB_PATH):
     c.row_factory = sqlite3.Row
     try:
         result['status'] = _status(c, case_id)
+        result['activity_history_viewed'] = bool(c.execute(
+            "SELECT 1 FROM audit_logs WHERE case_id=? AND actor=? AND action='ACTIVITY_HISTORY_VIEWED' AND status='success' LIMIT 1",
+            (case_id, current_user(db_path)['user_id'])).fetchone())
         evidence = c.execute('SELECT evidence_id FROM evidence WHERE case_id=?', (case_id,)).fetchall()
         result['evidence_count'] = len(evidence)
         result['stages']['Case Created'] = 'Completed'
@@ -105,3 +108,16 @@ def recent_events(case_id=None, db_path=DEFAULT_DB_PATH):
                      status=r[2]) for r in rows]
     finally:
         c.close()
+
+
+def visible_steps(progress):
+    """Six user tasks; intake groups case creation and evidence registration."""
+    stages = progress['stages']
+    return {
+        'New Investigation': all(stages[k] == 'Completed' for k in ('Case Created', 'Evidence Registered')),
+        'Email Analysis': all(stages[k] == 'Completed' for k in ('Integrity Verified', 'Analysis Completed')),
+        'Ask About the Email': stages['Evidence Questions Reviewed'] == 'Completed',
+        'Investigator Review': stages['Human Decision Recorded'] == 'Completed',
+        'Investigation Report': stages['Report Generated'] == 'Completed',
+        'Activity History': progress['activity_history_viewed'],
+    }

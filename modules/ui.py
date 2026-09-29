@@ -37,8 +37,8 @@ def require_login():
         if st.session_state.get('auth_token'):
             st.session_state.clear()
             st.warning('Your session expired or was revoked. Sign in again to continue.')
-    st.title('Local investigator login')
-    st.caption('Ask the local administrator to create your account. First setup: python -m modules.auth create-admin')
+    st.title('Investigator Login')
+    st.caption('Sign in with the account provided by your administrator.')
     with st.form('local_login', clear_on_submit=True):
         username = st.text_input('Username', max_chars=64)
         password = st.text_input('Password', type='password', max_chars=1024)
@@ -110,33 +110,45 @@ def setup_page(title: str) -> None:
     )
     with st.sidebar:
         st.title("Investigator workspace")
-        st.text('User: ' + user['user_id'])
+
         st.text('Role: ' + user['role'])
         st.text('Current case: ' + str(st.session_state.get('active_case_id') or 'None'))
         if st.button('Logout'):
             auth.logout(st.session_state.get('auth_token'), st.session_state, AUTH_DB_PATH)
             st.rerun()
-        st.caption(encryption_status(AUTH_DB_PATH)['message'])
-        for page, label in [('app.py','Dashboard'),
-            ('pages/1_New_Investigation.py','New Investigation'), ('pages/2_Evidence_Analysis.py','Evidence Analysis'),
-            ('pages/3_Ask_the_Evidence.py','Ask the Evidence'), ('pages/4_Human_Verification.py','Human Verification'),
-            ('pages/5_Forensic_Report.py','Forensic Report'), ('pages/6_Audit_Log.py','Audit Log'),
+
+        for page, label in [('app.py','Home'),
+            ('pages/1_New_Investigation.py','New Investigation'), ('pages/2_Evidence_Analysis.py','Email Analysis'),
+            ('pages/3_Ask_the_Evidence.py','Ask About the Email'), ('pages/4_Human_Verification.py','Investigator Review'),
+            ('pages/5_Forensic_Report.py','Investigation Report'), ('pages/6_Audit_Log.py','Activity History'),
             ('pages/7_Case_Management.py','User and Case Management'),
             ('pages/9_About_the_Prototype.py','About the Prototype')]:
-            if page == 'pages/7_Case_Management.py' and user['role'] != 'Administrator':
+            if page in {'pages/7_Case_Management.py', 'pages/9_About_the_Prototype.py'} and user['role'] != 'Administrator':
+                continue
+            if page in {'pages/7_Case_Management.py', 'pages/9_About_the_Prototype.py'}:
                 continue
             if st.button(label, key='navigate_' + page):
                 st.switch_page(page)
+        progress_slot = st.empty()
         if st.session_state.get('active_case_id'):
-            from modules.workflow import case_progress
-            progress = case_progress(st.session_state['active_case_id'], AUTH_DB_PATH)
-            with st.expander('Active case progress'):
-                for stage, status in progress['stages'].items():
-                    st.text(stage + ': ' + status)
-                st.caption(progress['next_action'])
-        st.caption("Local academic prototype")
-        st.info("Use the page navigation above to move through the workflow.")
-        st.warning(LIMITATION)
+            render_workflow_progress(progress_slot, st.session_state['active_case_id'])
+        if user['role'] == 'Administrator' and title != 'Home':
+            with st.expander('Technical Details'):
+                st.caption(encryption_status(AUTH_DB_PATH)['message'])
+                if st.button('User and Case Management'):
+                    st.switch_page('pages/7_Case_Management.py')
+                if st.button('About the Prototype'):
+                    st.switch_page('pages/9_About_the_Prototype.py')
+
+    return progress_slot
+
+
+def render_workflow_progress(slot, case_id):
+    from modules.workflow import case_progress, visible_steps
+    steps = visible_steps(case_progress(case_id, AUTH_DB_PATH))
+    done = sum(steps.values())
+    slot.progress(done / len(steps), text=f'{done} of {len(steps)} steps complete')
+
 
 
 def card(title: str, description: str) -> None:
@@ -152,3 +164,20 @@ def placeholder(title: str, introduction: str, functions: list[tuple[str, str]])
     st.info("Planned capability · This page is an interface placeholder. No evidence is processed here.")
     for heading, description in functions:
         card(heading, description)
+
+
+def technical_details(value):
+    if auth.current_user(AUTH_DB_PATH)['role'] == 'Administrator':
+        with st.expander('Technical Details'):
+            st.json(value)
+
+
+def case_labels():
+    from modules.case_service import list_cases
+    return {r['case_id']: r['masked_title'] for r in list_cases(db_path=AUTH_DB_PATH)}
+
+
+def email_label(evidence_id):
+    from modules.evidence_handler import get_evidence
+    row = get_evidence(evidence_id, db_path=AUTH_DB_PATH)
+    return row['original_filename'] if row else 'Email unavailable'

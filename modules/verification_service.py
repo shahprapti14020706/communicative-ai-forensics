@@ -24,34 +24,21 @@ WARNING = ('Automated findings are investigative leads only. A qualified investi
 CONFIRMATION = ('I confirm that I reviewed the displayed evidence, automated findings, integrity '
                 'status and stated limitations.')
 BLOCKED = 'Human verification is blocked because evidence integrity verification failed.'
-# Free prose can contain names, addresses and secrets that regex PII masking cannot
-# recognize. Retain only common review vocabulary after the existing privacy mask.
-# This intentionally over-redacts; no name recognition model or external service.
-SAFE_WORDS = set(('i a an the this that these those and or but because after before with without '
-    'of for to from in on at is are was were be been it its not no yes my we have has had '
-    'review reviewed verify verified verification evidence automated human analysis findings '
-    'classification conclusion suspicious uncertain significant indicators detected agree '
-    'disagree approve approved reject rejected modify modified request requested further '
-    'additional examination required needs needed more insufficient sufficient context '
-    'sender recipient identity email headers authentication results links link attachments '
-    'attachment integrity hash passed failed failure success original unchanged preserved '
-    'notes reason changed change version previous new final score risk rule based '
-    'check checked compare compared independently manual manually external limitations '
-    'confirm confirmed confirmation malicious legitimate safe safety phishing urgency urgent '
-    'password otp payment credentials account suspended final warning verify now action '
-    'transfer money bank details invoice gift cards refund claim login your within hours '
-    'request requests source body subject domain mismatch missing unavailable reported '
-    'test synthetic example fictional investigator explanation supports supported does do '
-    'cannot establish establish requires investigation reviewable corrected correction '
-    'false positive negative high medium low pending completed rejected approved').split())
-
-
 def private_text(value):
-    """Existing identifier masker plus conservative free-text suppression."""
-    masked = redact(value)
-    return re.sub(r'\[(?:(?:EMAIL|PHONE|IP|CARD|AADHAAR|PAN|PERSONAL)-\d+|PRIVATE)\]|[^\W_]+|_',
-                  lambda m: m[0] if m[0].startswith('[') or m[0].lower() in SAFE_WORDS
-                  else '[PRIVATE]', masked, flags=re.UNICODE)
+    """Mask identifiers without suppressing ordinary investigative prose."""
+    value = redact(str(value or ''))
+    return re.sub(r'<[^>]*>', '[PRIVATE]', value)
+
+
+
+def decision_text(item):
+    """Read separate fields, with a non-mutating adapter for old UI submissions."""
+    notes = item.get('masked_verification_notes') or item.get('rationale') or ''
+    reason = item.get('masked_decision_reason') or item.get('masked_change_reason') or ''
+    if not item.get('masked_decision_reason') and '\nReason: ' in notes:
+        notes, legacy_reason = notes.rsplit('\nReason: ', 1)
+        reason = reason or legacy_reason
+    return private_text(notes), private_text(reason) if reason else 'Not recorded.'
 
 
 def _event(connection, action, status='success', scope=None, **metadata):
@@ -134,7 +121,8 @@ def _required(value, label, minimum=1, maximum=5000):
 def record_decision(case_id, evidence_id, analysis_id, investigator_name, decision_type,
                     notes, confirmed, final_classification=None, requested_actions=None,
                     other_description='', change_reason='', version_reason='',
-                    expected_previous_id=None, db_path=DEFAULT_DB_PATH, data_root=DATA_ROOT):
+                    expected_previous_id=None, db_path=DEFAULT_DB_PATH, data_root=DATA_ROOT,
+                    decision_reason=None):
     initialize_database(db_path)
     connection = connect_database(db_path)
     scope = None
@@ -144,6 +132,11 @@ def record_decision(case_id, evidence_id, analysis_id, investigator_name, decisi
         scope = (case_id, evidence_id)
         _required(investigator_name, 'Investigator name', maximum=200)
         _required(notes, 'Verification notes', minimum=20)
+        if decision_reason is not None:
+            _required(decision_reason, 'Reason for the decision')
+        reason = decision_reason if decision_reason is not None else change_reason
+        if reason:
+            _required(reason, 'Reason for the decision')
         if confirmed is not True:
             raise ValidationError('The review confirmation is required.')
         if decision_type not in DECISIONS:
@@ -188,6 +181,7 @@ def record_decision(case_id, evidence_id, analysis_id, investigator_name, decisi
                       created_at=now, decision_version=version, decision_type=decision_type,
                       automated_classification=analysis['classification'], automated_risk_score=analysis['risk_score'],
                       final_classification=final, masked_verification_notes=masked_notes,
+                      masked_decision_reason=private_text(reason.strip()),
                       requested_actions=action_json, integrity_status='verified', evidence_sha256=row['sha256'],
                       created_at_utc=now, supersedes_decision_id=prior_id,
                       masked_version_reason=private_text(version_reason.strip()) if previous else '',

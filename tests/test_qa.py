@@ -74,6 +74,18 @@ class QATests(unittest.TestCase):
     def ask(self, question, analysis_id=None):
         return qa_service.ask(self.case, self.evidence, question, analysis_id or self.analysis['analysis_id'], self.db, self.root)
 
+    def test_no_findings_or_links_does_not_invent_warnings(self):
+        from modules.qa_engine import answer_question
+        context = qa_service.load_context(self.case, self.evidence, self.analysis['analysis_id'], self.db, self.root)
+        context['analysis']['findings'] = []
+        context['working']['urls'] = []
+        context['working']['body'] = 'A routine meeting is scheduled.'
+        why = answer_question('Why is this email suspicious?', context)
+        links = answer_question('Are there any suspicious links?', context)
+        self.assertIn('No matching warning signs', why['display_answer'])
+        self.assertIn('No links were retained', links['display_answer'])
+        self.assertNotIn('account-verification link', links['display_answer'])
+
     def test_wording_variations(self):
         pairs = [('Who is the sender?', 'sender'), ('Where did this message come from?', 'sender'),
                  ('Explain the result.', 'explanations'), ('Give reasons for this score.', 'explanations'),
@@ -317,6 +329,10 @@ def question_test(question, expected_intent, expected_text):
         self.assertEqual(result['intent'], expected_intent)
         self.assertIn(expected_text.casefold(), result['answer'].casefold())
         self.assertTrue(result['evidence_references'])
+        from modules.presentation import plain_answer
+        visible = plain_answer(result.get('display_answer') or result['answer'])
+        self.assertTrue(visible.strip())
+        self.assertNotIn('[PRIVATE]', visible)
         self.assertTrue(result['limitations'])
         self.assertNotIn('notice@example.net', json.dumps(result))
     return test
